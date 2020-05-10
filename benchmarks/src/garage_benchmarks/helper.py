@@ -35,8 +35,8 @@ import json
 import os
 import pathlib
 import random
-import shutil
 
+from google.cloud import storage
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
@@ -72,8 +72,12 @@ def benchmark(exec_func=None, *, plot=True, auto=False):
         plt.close('all')
 
         _log_dir = _get_log_dir(exec_func.__name__)
+
         if os.path.exists(_log_dir):
-            shutil.rmtree(_log_dir)
+            count = 1
+            while os.path.exists(_log_dir + '(' + str(count) + ')'):
+                count += 1
+            _log_dir = _log_dir + '(' + str(count) + ')'
 
         if auto:
             _auto = auto
@@ -92,6 +96,9 @@ def benchmark(exec_func=None, *, plot=True, auto=False):
                 plt.ylabel(_plot[env_id]['ylabel'])
                 plt.title(env_id)
                 plt.savefig(plot_dir + '/' + env_id)
+
+        if auto:
+            _upload_to_gcp_storage(_log_dir)
 
     return wrapper_func
 
@@ -211,3 +218,24 @@ def _export_to_json(json_name, xs, xlabel, ys, ylabel, ys_std):
                  y_max=(ys + ys_std).tolist(),
                  xlabel=xlabel,
                  ylabel=ylabel), json_file)
+
+
+def _upload_to_gcp_storage(exec_dir):
+    """Upload the /auto files to GCP storage under exec_dir.
+
+    This is used for automatic benchmarking only.
+
+    Args:
+        exec_dir (str): The execution directory.
+
+    """
+    client = storage.Client()
+    bucket = client.bucket('resl-garage-benchmarks')
+
+    json_dir = os.path.join(exec_dir, 'auto')
+    for file_name in os.listdir(json_dir):
+        if file_name.endswith('.json'):
+            file_path = os.path.join(json_dir, file_name)
+
+            blob = bucket.blob(file_name)
+            blob.upload_from_filename(file_path)
